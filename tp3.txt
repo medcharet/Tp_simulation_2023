@@ -1,0 +1,295 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <conio.h>
+#include <math.h>
+#include <iostream>
+#include <gsl/gsl_vector.h>
+#include <gsl/gsl_matrix.h>
+#include <gsl/gsl_linalg.h>
+#include <gsl/gsl_blas.h>
+#include <gsl/gsl_sf_erf.h>
+#include<time.h>
+#include<gsl/gsl_rng.h>
+#include<gsl/gsl_randist.h>
+#include<gsl/gsl_statistics_int.h>
+#include<gsl/gsl_statistics_double.h>
+using namespace std;
+
+#define pi 3.1415926535
+
+gsl_matrix *Solution_Explicite(int n, double a, double T, double L, int M,int N){
+	gsl_matrix *Solution; Solution=gsl_matrix_alloc(N+1,M+1);
+	double k,h,x,t;
+	
+	k=T/M;
+    h=L/N;
+    
+	for(int i=0;i<=N;i++)
+    {
+        for(int j=0;j<=M;j++)
+        {
+        	x=i*h;
+        	t=j*k;
+			gsl_matrix_set(Solution,i,j,exp(-a*t*pow(n*pi/L,2))*sin(n*x*pi/L));
+        }
+    }
+    return Solution;
+}
+
+gsl_matrix *Solution_Implicite(int n, double a, double T, double L, int M,int N)
+{
+    double k,h,x;
+    
+    k=T/M;
+    h=L/N;
+	
+	gsl_vector *U = gsl_vector_alloc(N+1); //Vecteur initiale U
+    gsl_matrix *Solution = gsl_matrix_alloc(N+1,M+1);  //Matrice des solutions
+    gsl_vector *V = gsl_vector_alloc(N+1); //Vecteur V
+    gsl_matrix *A = gsl_matrix_alloc(N+1,M+1);  //La matrice tridiagonale de Toeplitz
+    gsl_matrix *I = gsl_matrix_alloc(N+1,N+1);  //Matice identit?
+    gsl_matrix_set_identity(I);
+    gsl_matrix *B = gsl_matrix_alloc(N+1,M+1); //Allouer la memoire pour la matrice inverse
+
+    gsl_matrix_set_identity(A); //Initialisation de A
+    gsl_matrix_scale(A,2);
+	for(int i=0;i<=N;i++)	//Remplissage des matrices A
+    {
+        for(int j=0;j<=M;j++)
+        {
+            if(i==j+1 || i==j-1){gsl_matrix_set(A,i,j,-1);}
+        }
+    }
+    
+    gsl_matrix_scale(A,k*a/pow(h,2));//A contient maintenant (k/h^2)*A
+    gsl_matrix_add(A,I); //Faire la somme de la matrice identit? et A et garder le r?sutat dans A
+	
+	gsl_permutation *p=gsl_permutation_alloc(N+1);
+	int s;
+    gsl_linalg_LU_decomp(A,p,&s);
+    gsl_linalg_LU_invert(A,p,B); //Inversion de (I+(k/h^2)*A)
+    gsl_permutation_free(p);
+    
+    for(int i=0;i<=N;i++) //Remplissage de la matrice U(0)
+    {
+        x=i*h;
+		gsl_vector_set(U,i,sin(n*x*pi/L));
+    }
+
+    gsl_matrix_set_col(Solution,0,U); //Ajouter le vacteur U dans la premi?re colonne de la matrice m
+    for(int i=1;i<=M;i++)
+    {
+        gsl_blas_dgemv(CblasNoTrans,1.0,B,U,0.0,V); //V contient le produit Inv*U
+        gsl_matrix_set_col(Solution, i, V); //Ins?rer le vacteur V dans la i-i?me colonne de la matrice m
+        gsl_vector_memcpy(U,V); //Sauvegarder la valeur de V dans U
+    }
+    return Solution;
+}
+
+gsl_matrix *Solution_Cranck_Nicolson(int n, double a, double T, double L, int M,int N)
+{
+    double k,h,x;
+    
+    k=T/M;
+    h=L/N;
+	
+	gsl_vector *U = gsl_vector_alloc(N+1); //Vecteur initiale U
+    gsl_matrix *Solution = gsl_matrix_alloc(N+1,M+1);  //Matrice des solutions
+    gsl_vector *V = gsl_vector_alloc(N+1); //Vecteur V
+    gsl_vector *W = gsl_vector_alloc(N+1);
+	gsl_matrix *A1 = gsl_matrix_alloc(N+1,M+1);  //La matrice tridiagonale de Toeplitz
+    gsl_matrix *A2 = gsl_matrix_alloc(N+1,M+1);
+	gsl_matrix *I = gsl_matrix_alloc(N+1,N+1);  //Matice identit?
+    gsl_matrix_set_identity(I);
+    gsl_matrix *B = gsl_matrix_alloc(N+1,M+1); //Allouer la memoire pour la matrice inverse
+
+    gsl_matrix_set_identity(A1); //Initialisation de A
+    gsl_matrix_scale(A1,2);
+	for(int i=0;i<=N;i++)	//Remplissage des matrices A
+    {
+        for(int j=0;j<=M;j++)
+        {
+            if(i==j+1 || i==j-1){gsl_matrix_set(A1,i,j,-1);}
+        }
+    }
+    gsl_matrix_memcpy(A2,A1);
+    gsl_matrix_scale(A1,0.5*k*a/pow(h,2));//A contient maintenant (k/h^2)*A
+    gsl_matrix_scale(A2,-0.5*k*a/pow(h,2));
+	gsl_matrix_add(A1,I); //Faire la somme de la matrice identit? et A et garder le r?sutat dans A
+	gsl_matrix_add(A2,I);
+	
+	gsl_permutation *p=gsl_permutation_alloc(N+1);
+	int s;
+    gsl_linalg_LU_decomp(A1,p,&s);
+    gsl_linalg_LU_invert(A1,p,B); //Inversion de (I+(k/h^2)*A)
+    gsl_permutation_free(p);
+    
+    for(int i=0;i<=N;i++) //Remplissage de la matrice U(0)
+    {
+        x=i*h;
+		gsl_vector_set(U,i,sin(n*x*pi/L));
+    }
+
+    gsl_matrix_set_col(Solution,0,U); //Ajouter le vacteur U dans la premi?re colonne de la matrice m
+    for(int i=1;i<=M;i++)
+    {
+        gsl_blas_dgemv(CblasNoTrans,1.0,A2,U,0.0,W); //V contient le produit Inv*U
+        gsl_blas_dgemv(CblasNoTrans,1.0,B,W,0.0,V);
+		gsl_matrix_set_col(Solution, i, V); //Ins?rer le vacteur V dans la i-i?me colonne de la matrice m
+        gsl_vector_memcpy(U,V); //Sauvegarder la valeur de V dans U
+    }
+    return Solution;
+}
+
+gsl_matrix *Price_Black_Scholes(double K,int n, double T, double L, int M,int N, double sigma, double r)
+{
+	double k,h,x,t,d1,d2,a;
+	gsl_matrix *A = gsl_matrix_alloc(N+1,M+1);
+	
+	k=T/M;
+    h=L/N;
+	
+	for(int i=0;i<=N;i++)	//Remplissage des matrices A
+    {
+        x=i*h;
+		for(int j=1;j<=M;j++)
+        {
+        	t=j*k;
+            d1 = (x+(1+r*2/pow(sigma,2))*t)/sqrt(2*t);
+            d2=d1-sqrt(2*t);
+            a=K*exp(x)*gsl_sf_erf_Q(-d1) - K*exp(-2*r*t/pow(sigma,2))*gsl_sf_erf_Q(-d2);
+			if(a<0){
+				gsl_matrix_set(A,i,j,0);
+			}
+			else gsl_matrix_set(A,i,j,a);
+        }
+    }
+	return A;
+}
+
+gsl_matrix *Price_Implicite(double K,int n, double T, double L, int M,int N, double sigma, double r)
+{
+	gsl_matrix *A = gsl_matrix_alloc(N+1,M+1);
+	gsl_matrix *B = gsl_matrix_alloc(N+1,M+1);
+	
+	double k,h,x,t,a,q=2*r/pow(sigma,2);
+	
+	k=T/M;
+    h=L/N;
+	
+	double a1,a2;
+	A = Solution_Implicite(n,1,T,L,M,N);
+    for(int i=0;i<=N;i++)
+    {
+        for(int j=1;j<=M;j++)
+        {
+        	x=i*h;
+			t=j*k;
+            a1=K*exp(-0.5*(q+1)*x-0.25*pow((q-1),2)*t);
+            a2=gsl_matrix_get(A,i,j);
+            gsl_matrix_set(B,i,j,a1*a2);
+        }
+    }
+    return B;
+}
+
+gsl_matrix *Price_Cranck_Nicolson(double K,int n, double T, double L, int M,int N, double sigma, double r)
+{
+	gsl_matrix *A = gsl_matrix_alloc(N+1,M+1);
+	gsl_matrix *B = gsl_matrix_alloc(N+1,M+1);
+	
+	double k,h,x,t,a,q=2*r/pow(sigma,2);
+	
+	k=T/M;
+    h=L/N;
+	
+	for(int i=0;i<=N;i++)	//Remplissage des matrices A
+    {
+        for(int j=0;j<=M;j++)
+        {
+            x= i*h;
+            t=j*k;
+            a=K*exp(-(0.5*(q-1)*x+0.25*t*pow(q+1,2)));
+			gsl_matrix_set(B,i,j,a);
+        }
+    }
+    
+    A = Solution_Cranck_Nicolson(n,1,T,L,M,N);
+    gsl_matrix_mul_elements(B,A);
+    return B;
+}
+
+
+
+
+
+
+int main()
+{
+    int n,M,N;
+    cout << "valeur de n : n  ="; cin >> n;
+	cout << "nombre de pas du temps : M = "; cin >> M;
+	cout << "nombre de pas de x : N = "; cin >> N;
+	double a, T, L,r,sigma;
+	cout << "valeur de a : a  ="; cin >> a;
+	cout << "valeur de la maturite : T  = "; cin >> T;
+	cout << "valeur de L : L  ="; cin >> L;
+	cout << "valeur du taux d'interet   : r = "; cin >> r;
+	cout << "volatilite : sigma = "; cin >> sigma;	
+	
+	gsl_matrix *Explicite = Solution_Explicite(n,a,T,L,M,N);
+    gsl_matrix *Implicite = Solution_Implicite(n,a,T,L,M,N);
+    gsl_matrix *Cranck_Nicolson = Solution_Cranck_Nicolson(n,a,T,L,M,N);
+	printf("Solution explicite    Solution implicite    Solution Cranck-Nicolson\n\n");
+	
+	for(int j=0;j<=5;j++) //Affichage de la matrice
+	{
+		for(int i=0;i<=5;i++)
+		{
+			printf("%f              %f              %f\n",gsl_matrix_get(Explicite,i,j),gsl_matrix_get(Implicite,i,j),gsl_matrix_get(Cranck_Nicolson,i,j));
+		}
+	}
+	printf("\n\n");
+	
+	FILE *Fichier, *plot;
+	Fichier=fopen("C:\\Users\\hp\\Desktop\\ccc\\TP simulation C++\\tp3\\tp3.dat","w");
+	fprintf(Fichier,"Iteration Solution_Explicite Solution_Implicite Solution_Cranck_Nicolson\n\n");
+	for (int j=0; j<=M; j++)
+	{
+		gsl_matrix *Explicite = Solution_Explicite(n,a,T,L,M,N);
+    	gsl_matrix *Implicite = Solution_Implicite(n,a,T,L,M,N);
+    	gsl_matrix *Cranck_Nicolson = Solution_Cranck_Nicolson(n,a,T,L,M,N);
+		fprintf(Fichier,"%d  %f	%f	%f\n",j,gsl_matrix_get(Explicite,5,j),gsl_matrix_get(Implicite,5,j),gsl_matrix_get(Cranck_Nicolson,5,j)); 
+	}
+	fclose(Fichier);
+	
+	plot = popen("C:\\gnuplot\\bin\\gnuplot.exe","w");
+	fprintf(plot, "set style data lines\n");
+	fprintf(plot,"plot 'C:\\Users\\hp\\Desktop\\ccc\\TP simulation C++\\tp3\\tp3.dat' using 1:2 title 'Solution Explicite' lw 2, 'C:\\Users\\hp\\Desktop\\ccc\\TP simulation C++\\tp3\\tp3.dat' using 1:4 title 'Solution Cranck Nicolson' lw 2\n");
+	fflush(plot);
+	getch();
+	
+	int test;
+    cout << "vous voullez continuer ? la partie II, 1 si oui 0 sinon = ";
+	cin >> test;
+	if(test==1){
+		// Partie 2 du TP : comparer les prix du call des deux sch?mas avec Black & Scholes  
+		//Pricing avec la formule de Black and scholes
+    	gsl_matrix *Black_Scholes = Price_Black_Scholes(200,n,T,L,M,N,r,sigma);
+    	gsl_matrix *Implicite_Price = Price_Implicite(200,n,T,L,M,N,r,sigma);
+    	gsl_matrix *Cranck_Nicolson_Price = Price_Cranck_Nicolson(200,n,T,L,M,N,r,sigma);
+		printf("Black_Scholes    Implicite_Price    Cranck_Nicolson_Price\n\n");
+	
+		for(int i=0;i<=2;i++) //Affichage de la matrice
+		{
+			for(int  j=0;j<=2;j++)
+			{
+				printf("%f              %f              %f\n",gsl_matrix_get(Black_Scholes,i,j),gsl_matrix_get(Implicite_Price,i,j),gsl_matrix_get(Cranck_Nicolson_Price,i,j));
+			}
+		}
+		printf("\n\n");
+	}
+	
+	
+	return 0;
+}
